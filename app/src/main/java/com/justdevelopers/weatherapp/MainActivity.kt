@@ -7,6 +7,7 @@ import android.app.ProgressDialog
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.net.Uri
@@ -16,6 +17,8 @@ import android.os.Bundle
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
@@ -23,6 +26,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.*
 import com.google.android.material.snackbar.Snackbar
+import com.google.gson.Gson
 import com.justdevelopers.weatherapp.databinding.ActivityMainBinding
 import com.justdevelopers.weatherapp.models.WeatherModel
 import com.justdevelopers.weatherapp.network.WeatherService
@@ -31,11 +35,14 @@ import retrofit2.Callback
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.text.SimpleDateFormat
+import java.util.*
 
 @TargetApi(Build.VERSION_CODES.N)
 class MainActivity : AppCompatActivity() {
     private lateinit var mFusedLocationClient: FusedLocationProviderClient
     private lateinit var binding:ActivityMainBinding
+    private lateinit var mSharedPrefs: SharedPreferences
 //    private val utilService : UtilService
 
     private val requestLocationPermission:ActivityResultLauncher<Array<String>> = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){
@@ -59,6 +66,8 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         mFusedLocationClient =LocationServices.getFusedLocationProviderClient(this)
+        mSharedPrefs = getSharedPreferences(Constants.PREFERENCE_NAME, Context.MODE_PRIVATE)
+        setupUI()
         val parentView:View = findViewById(android.R.id.content)
         if(!isLocationEnabled()){
 //            Toast.makeText(this,"Please turn on Location services under system settings",Toast.LENGTH_LONG).show()
@@ -113,9 +122,14 @@ class MainActivity : AppCompatActivity() {
                     if(response.isSuccessful){
                         progressDialog.dismiss()
                         val weatherModel=response.body()
-                        setupUI(weatherModel!!)
+                        val weatherResponseJsonString = Gson().toJson(weatherModel)
+                        val editor = mSharedPrefs.edit()
+                        editor.putString(Constants.WEATHER_RESPONSE_DATA,weatherResponseJsonString)
+                        editor.apply()
+                        setupUI()
                         Log.e("response",weatherModel.toString())
                     }else{
+                        progressDialog.dismiss()
                         when(response.code()){
                             400 ->{
                                 Log.e("Error 400","Bad connection")
@@ -186,13 +200,32 @@ class MainActivity : AppCompatActivity() {
 
 
     }
-    private fun setupUI(weatherList:WeatherModel){
-        for(i in weatherList.weather.indices){
-            Log.i("weathername",weatherList.weather.toString())
-            binding.tvMain.text = weatherList.weather[i].main
-            binding.tvMainDescription.text = weatherList.weather[i].description
-            binding.tvTemp.text = weatherList.main.temp.toString() + getUnit(application.resources.configuration.toString())
+    private fun setupUI(){
+        val gson = Gson()
+        val json: String? = mSharedPrefs.getString(Constants.WEATHER_RESPONSE_DATA, "")
+        if (json!=null){
+            val weatherList: WeatherModel = gson.fromJson(json, WeatherModel::class.java)
+            Log.e("respon",weatherList.toString())
+            for(i in weatherList.weather.indices){
+                Log.i("weathername",weatherList.weather.toString())
+                binding.tvMain.text = weatherList.weather[i].main
+                binding.tvMainDescription.text = weatherList.weather[i].description
+                binding.tvTemp.text = weatherList.main.temp.toString() + getUnit(application.resources.configuration.locales.toString())
+                binding.tvSunriseTime.text = unixTime(weatherList.sys.sunrise)
+                binding.tvSunsetTime.text = unixTime(weatherList.sys.sunset)
+                binding.tvHumidity.text = weatherList.main.humidity.toString()+" percent"
+                binding.tvMin.text = weatherList.main.temp_min.toString()+" min"
+                binding.tvMax.text = weatherList.main.temp_max.toString()+" max"
+                binding.tvSpeed.text = weatherList.wind.speed.toString()
+                binding.tvName.text = weatherList.name
+                binding.tvCountry.text = weatherList.sys.country
+                when(weatherList.weather[i].icon){
+                    "01d" -> binding.ivMain.setImageResource(R.drawable.sunny)
 
+                }
+
+
+            }
         }
     }
 
@@ -202,6 +235,27 @@ class MainActivity : AppCompatActivity() {
             valu = "°F"
         }
         return valu
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
+        menuInflater.inflate(R.menu.menu_main,menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when(item.itemId){
+            R.id.action_refresh -> {
+                requestLocationData()
+                true
+            }else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun unixTime(timex: Long): String? {
+        val date = Date(timex*1000L)
+        val sdf = SimpleDateFormat("h:mm a")
+        sdf.timeZone = TimeZone.getDefault()
+        return sdf.format(date)
     }
 }
 
